@@ -1,0 +1,42 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- develop
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- script: echo Hello, world!
+  displayName: 'Run a one-line script'
+- task: JavaToolInstaller@0
+  inputs:
+    versionSpec: '17'
+    jdkArchitectureOption: 'x64'
+    jdkSourceOption: 'PreInstalled'
+
+- script: |
+    echo Add other tasks to build, test, and deploy your project.
+    echo See https://aka.ms/yaml
+  displayName: 'Run a multi-line script'
+- task: AzureAppServiceSettings@1
+  inputs:
+    azureSubscription: 'Azure subscription 1(e691dae5-ea2b-402e-bff9-7104889009b2)'
+    appName: 'demosec03'
+    resourceGroupName: 'rg-demo-props-01'
+    appSettings: |
+      [
+         {
+          "name": "GITHUB_CLIENT_ID",
+          "value": "Ov23liZfqwShh2fZuoNi",
+          "slotSetting": false
+         },
+         {
+          "name": "GITHUB_CLIENT_SECRET",
+          "value": "c1976111bc77b90c665f2df9568dba68b3acf146",
+          "slotSetting": false
+         }
+      ]
