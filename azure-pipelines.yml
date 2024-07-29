@@ -10,34 +10,111 @@ pool:
   name: DemoPool
   vmImage: ubuntu-latest
 
-steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
-- task: JavaToolInstaller@0
-  inputs:
-    versionSpec: '17'
-    jdkArchitectureOption: 'x64'
-    jdkSourceOption: 'PreInstalled'
+variables:
+  ### Build Vars
+  artifactName: "jar file"
+  includePath: "*"
+  keyVaultName: rgdemo2                 #Name to your Azure Keyvault
+  loginServer: demoprops.azurecr.io    #Domain name of ACR
+  mavenPomFile: "./pom.xml"
+  resourceGroupName: rg-demo-props-01          #Name of your Azure Resource Group where your ACR is located
+  serviceConnection: "Azure subscription 1"            #Azure DevOps Service Connection Name that connect to your Azure resources(Azure keyVault)
 
-- script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
-  displayName: 'Run a multi-line script'
-- task: AzureAppServiceSettings@1
-  inputs:
-    azureSubscription: 'Azure subscription 1(e691dae5-ea2b-402e-bff9-7104889009b2)'
-    appName: 'demosec03'
-    resourceGroupName: 'rg-demo-props-01'
-    appSettings: |
-      [
-         {
-          "name": "GITHUB_CLIENT_ID",
-          "value": "Ov23liZfqwShh2fZuoNi",
-          "slotSetting": false
-         },
-         {
-          "name": "GITHUB_CLIENT_SECRET",
-          "value": "c1976111bc77b90c665f2df9568dba68b3acf146",
-          "slotSetting": false
-         }
-      ]
+jobs:
+
+# The build job builds the code and publishes the build results for consumption in later jobs.
+  - job: Build
+    timeoutInMinutes: 360
+    displayName: Build
+    pool: 'DemoPool'  #Use a private agent b/c the storage accounts have private endpoints
+    steps:
+      - task: JavaToolInstaller@0
+        inputs:
+          versionSpec: '17'
+          jdkArchitectureOption: 'x64'
+          jdkSourceOption: 'AzureStorage'
+          azureResourceManagerEndpoint: '$(serviceConnection)'
+          azureStorageAccountName: 'demostacc01'
+          azureContainerName: 'jdk'
+          azureCommonVirtualFile: 'openlogic-openjdk-17.0.11+9-linux-x64.tar.gz'
+          jdkDestinationDirectory: "/opt/jdk-17/"
+          cleanDestinationDirectory: false
+
+      - task: Maven@3
+        displayName: 'Maven Build'
+        inputs:
+          srcDirectories: '$(includePath)'
+          mavenPomFile: '$(mavenPomFile)'
+          goals: 'clean compile'
+          options: '-DskipTests=true'
+          publishJUnitResults: false
+          javaHomeOption: "JDKVersion"
+          jdkUserInputPath: "/opt/jdk-17/JAVA_HOME_17_X64_openlogic-openjdk-17.0.11+9-linux-x64.tar.gz/jdk-17.0.2"
+          mavenVersionOption: 'Default'
+          mavenAuthenticateFeed: false
+          effectivePomSkip: false
+          sonarQubeRunAnalysis: False
+
+      - task: Maven@3
+        displayName: 'Maven Package'
+        inputs:
+          srcDirectories: '$(includePath)'
+          mavenPomFile: '$(mavenPomFile)'
+          goals: 'package'
+          options: '-DskipTests=true'
+          publishJUnitResults: false
+          mavenVersionOption: 'Default'
+          mavenAuthenticateFeed: false
+          effectivePomSkip: false
+          sonarQubeRunAnalysis: false
+
+      - task: Maven@3
+        displayName: Maven Install
+        inputs:
+          srcDirectories: '$(includePath)'
+          mavenPomFile: '$(mavenPomFile)'
+          goals: 'clean install'
+          options: '-DskipTests=true'
+          mavenVersionOption: 'Default'
+          mavenAuthenticateFeed: false
+          effectivePomSkip: false
+
+      - task: PublishBuildArtifacts@1
+        displayName: PublishArtifact
+        inputs:
+          pathToPublish: '$(Build.SourcesDirectory)/target/'
+          artifactName: '$(artifactName)'
+          publishLocation: 'Container'
+
+
+# The publish artifact job builds the Docker file, pushes the resulting image to the specified ACR, replaces the tokens in the manifest templates with the proper images and tags, and publishes the manifest files
+  - job: PublishArtifact
+    dependsOn:
+      - Build
+    displayName: Build and Push Images to ACR
+    condition: and(succeeded(), contains(variables['build.sourceBranch'], 'refs/heads/release'))
+    steps:
+      - task: JavaToolInstaller@0
+        inputs:
+          versionSpec: '17'
+          jdkArchitectureOption: 'x64'
+          jdkSourceOption: 'AzureStorage'
+          azureResourceManagerEndpoint: 'rg-demo-props-01'
+          azureStorageAccountName: 'sanextgenposdeve201'
+          azureContainerName: 'jdk'
+          azureCommonVirtualFile: 'openlogic-openjdk-17.0.11+9-linux-x64.tar.gz'
+          jdkDestinationDirectory: "/opt/jdk-17/"
+          cleanDestinationDirectory: false
+
+      - task: Maven@3
+        displayName: 'mvn builds Docker Image App'
+        inputs:
+          mavenPomFile: 'pom.xml'
+          mavenOptions: "-Xmx3072m"
+          javaHomeOption: "JDKVersion"
+          jdkUserInputPath: "/opt/jdk-17/JAVA_HOME_17_X64_openlogic-openjdk-17.0.11+9-linux-x64.tar.gz/jdk-17.0.11+9"
+          jdkVersionOption: "1.17"
+          jdkArchitectureOption: "x64"
+          publishJUnitResults: false
+          goals: "compile jib:build"
+      
